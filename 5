@@ -1,0 +1,112 @@
+import psycopg2
+
+conn = psycopg2.connect(database="tasksql", user="postgres", password="2276057Marga!")
+def create_db(conn):
+
+    with conn.cursor() as cur:
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS client(client_id SERIAL PRIMARY KEY, 
+        name VARCHAR(20),
+        surname VARCHAR(20),
+        email VARCHAR(50));
+        """)
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS phone(phone_id SERIAL PRIMARY KEY, 
+        number_phone VARCHAR(20),
+        client_id INTEGER REFERENCES client(client_id));
+        """)
+        conn.commit()
+def add_client(conn, name, surname, email, number_phone=None):
+    with conn.cursor() as cur:
+        cur.execute("""
+        INSERT INTO client(name, surname, email) 
+        VALUES (%s, %s, %s)
+        RETURNING client_id;
+        """, (name, surname, email))
+        client_id = cur.fetchone()[0]
+
+        if number_phone:
+            cur.execute("""
+            INSERT INTO phone(number_phone, client_id) 
+            VALUES (%s, %s);
+            """,(number_phone, client_id))
+    conn.commit()
+def add_phone(conn, client_id, number_phone):
+    with conn.cursor() as cur:
+        cur.execute("""
+        INSERT INTO phone(number_phone, client_id) 
+            VALUES (%s, %s);
+            """,(number_phone, client_id))
+    conn.commit()
+def change_client(conn, client_id, first_name=None, last_name=None, email=None, phones=None):
+    with conn.cursor() as cur:
+        if first_name:
+            cur.execute("UPDATE client SET name = %s WHERE client_id = %s;", (first_name, client_id))
+        if last_name:
+            cur.execute("UPDATE client SET surname = %s WHERE client_id = %s;", (last_name, client_id))
+        if email:
+            cur.execute("UPDATE client SET email = %s WHERE client_id = %s;", (email, client_id))
+        if phones is not None:
+            cur.execute("DELETE FROM phone WHERE client_id = %s;", (client_id,))
+            for phone in phones:
+                cur.execute("""
+                                INSERT INTO phone(number_phone, client_id) 
+                                VALUES (%s, %s);
+                            """, (phone, client_id))
+    conn.commit()
+
+def delete_phone(conn, client_id, number_phone=None):
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM client WHERE client_id = %s;", (client_id,))
+        if cur.fetchone() is None:
+            raise ValueError(f"Клиент с id {client_id} не найден.")
+        if number_phone:
+            cur.execute("DELETE FROM phone WHERE client_id = %s AND number_phone = %s;", (client_id,number_phone))
+        else:
+            cur.execute("DELETE FROM phone WHERE client_id = %s;", (client_id,))
+    conn.commit()
+
+def delete_client(conn, client_id):
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM client WHERE client_id = %s;", (client_id,))
+        if cur.fetchone() is None:
+            raise ValueError(f"Клиент с id {client_id} не найден.")
+        cur.execute("DELETE FROM phone WHERE client_id = %s;", (client_id,))
+        cur.execute("DELETE FROM client WHERE client_id = %s;", (client_id,))
+    conn.commit()
+
+def find_client(conn, first_name=None, last_name=None, email=None, phone=None):
+    with conn.cursor() as cur:
+        query = """
+                SELECT client.client_id, client.name, client.surname, client.email, phone.number_phone
+                FROM client
+                LEFT JOIN phone ON client.client_id = phone.client_id
+                WHERE TRUE
+                """
+        params = []
+        if first_name:
+            query += " AND client.name ILIKE %s"
+            params.append(f"%{first_name}%")
+        if last_name:
+            query += " AND client.surname ILIKE %s"
+            params.append(f"%{last_name}%")
+        if email:
+            query += " AND client.email ILIKE %s"
+            params.append(f"%{email}%")
+        if phone:
+            query += " AND phone.number_phone = %s"
+            params.append(phone)
+
+        cur.execute(query, params)
+        results = cur.fetchall()
+    return results
+with psycopg2.connect(database="clients_db", user="postgres", password="postgres") as conn:
+    add_client(conn, "Иван", "Иванов", "ivan@example.com", "+79001234567")
+    add_phone(conn, client_id=1, number_phone="+79001112233")
+    change_client(conn, client_id=1, email="ivan_new@example.com", phones=["+79001234567", "+79005554433"])
+    clients = find_client(conn, first_name="Иван")
+    print(clients)
+    delete_phone(conn, client_id=1, number_phone="+79001112233")
+    delete_client(conn, client_id=1)
+conn.close()
